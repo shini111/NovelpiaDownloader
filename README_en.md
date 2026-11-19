@@ -23,3 +23,23 @@ Get `NovelpiaDownloader.exe` from the [Releases](https://github.com/CjangCjengh/
    - **Save to**: output folder.
    - **Format**: EPUB / TXT.
 6. Click **Download** to download immediately, or **Add to queue** to queue multiple novels, then click **Download** in the right-side list to run the batch.
+
+## Batch list from a text file
+
+Put the full path of a `.txt` file in **Novel number** (one novel number or URL per line) and click **Add to queue**. Every line is queued with the current settings.
+
+## Pacing
+
+**Interval** is the minimum pause between chapter batches. A random 0 to 1 s is added each time, so an interval of 4.0 gives 4 to 5 s. Threads inside a batch start 0.3 to 0.9 s apart. In a queue, a random 10 to 30 s pause is added between novels. Use 1 or 2 threads. An interval of 0 turns the pacing off.
+
+## File names
+
+Queue and list downloads are saved in the **Save to** folder as `<novel number>.epub` (or `.txt`), with `_<from>-<to>` added if you tick the range option. A single **Start** download always opens a Save dialog so you choose the name yourself.
+
+## Failed chapters
+
+A chapter that fails is never skipped: the downloader waits 30 seconds and tries again, for as long as it takes, until it works or you press Stop. The log shows each failed attempt with its reason. The Retry box now only applies to image downloads.
+
+## Ranges and file numbers (old downloader behaviour)
+
+**From Ep.** and **To Ep.** are positions in the novel's chapter list, counted from 1 and inclusive: From 25 To 30 downloads the 25th to the 30th chapter. Inside the EPUB the files are numbered by their position in the full list starting at `chapter0000`, so a range never renumbers them (From 25 gives `chapter0024` onward). **Always include BONUS** adds every BONUS chapter whatever the range, and **Exclude BONUS** skips them all.

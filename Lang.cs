@@ -224,6 +224,9 @@ namespace NovelpiaDownloader
             { "btn_add_to_list", new Dictionary<string, string> {
                 { Ko, "목록에 추가" }, { En, "Add to queue" }, { ZhCn, "添加到队列" }, { ZhTw, "加入佇列" },
                 { Ja, "キューに追加" }, { Vi, "Thêm vào hàng đợi" }, { Th, "เพิ่มในคิว" }, { Id, "Tambah ke antrian" } } },
+            { "btn_import_list", new Dictionary<string, string> {
+                { Ko, "목록 가져오기..." }, { En, "Import list..." }, { ZhCn, "导入列表..." }, { ZhTw, "匯入清單..." },
+                { Ja, "リスト読み込み..." }, { Vi, "Nhập danh sách..." }, { Th, "นำเข้ารายการ..." }, { Id, "Impor daftar..." } } },
             { "btn_queue_delete_all", new Dictionary<string, string> {
                 { Ko, "전체 삭제" }, { En, "Clear all" }, { ZhCn, "全部删除" }, { ZhTw, "全部刪除" },
                 { Ja, "すべて削除" }, { Vi, "Xoá tất cả" }, { Th, "ลบทั้งหมด" }, { Id, "Hapus semua" } } },
@@ -495,6 +498,7 @@ namespace NovelpiaDownloader
             f.ExtensionLabel.Text = T("ui_extension");
             f.DownloadButton.Text = T("btn_download");
             f.AddToListButton.Text = T("btn_add_to_list");
+            f.ImportListButton.Text = T("btn_import_list");
             f.QueueDeleteAllButton.Text = T("btn_queue_delete_all");
             f.QueueDeleteSelectedButton.Text = T("btn_queue_delete_selected");
             f.QueueDownloadButton.Text = T("btn_queue_download");
@@ -634,6 +638,11 @@ namespace NovelpiaDownloader
             if (addBtnW < 80) addBtnW = 80;
             f.AddToListButton.Size = new Size(addBtnW, 36);
             f.AddToListButton.Location = new Point(f.DownloadButton.Location.X - 8 - addBtnW, 317);
+
+            int impBtnW = MeasureWidth(f.ImportListButton, f.ImportListButton.Text, 28);
+            if (impBtnW < 80) impBtnW = 80;
+            f.ImportListButton.Size = new Size(impBtnW, 36);
+            f.ImportListButton.Location = new Point(f.AddToListButton.Location.X - 8 - impBtnW, 317);
 
             int dlGroupBottomInner = f.DownloadButton.Location.Y + f.DownloadButton.Size.Height + 18;
 

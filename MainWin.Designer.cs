@@ -64,6 +64,7 @@
             this.FromCheck = new System.Windows.Forms.CheckBox();
             this.DownloadButton = new System.Windows.Forms.Button();
             this.AddToListButton = new System.Windows.Forms.Button();
+            this.ImportListButton = new System.Windows.Forms.Button();
             this.DownloadList = new System.Windows.Forms.ListBox();
             this.QueueDownloadButton = new System.Windows.Forms.Button();
             this.QueueDeleteAllButton = new System.Windows.Forms.Button();
@@ -201,6 +202,7 @@
             this.DownloadGroup.Controls.Add(this.FromNum);
             this.DownloadGroup.Controls.Add(this.FromCheck);
             this.DownloadGroup.Controls.Add(this.AddToListButton);
+            this.DownloadGroup.Controls.Add(this.ImportListButton);
             this.DownloadGroup.Controls.Add(this.DownloadButton);
             this.DownloadGroup.Controls.Add(this.TxtButton);
             this.DownloadGroup.Controls.Add(this.EpubButton);
@@ -606,6 +608,16 @@
             this.AddToListButton.UseVisualStyleBackColor = true;
             this.AddToListButton.Click += new System.EventHandler(this.AddToListButton_Click);
             // 
+            // ImportListButton
+            // 
+            this.ImportListButton.Location = new System.Drawing.Point(120, 299);
+            this.ImportListButton.Name = "ImportListButton";
+            this.ImportListButton.Size = new System.Drawing.Size(120, 36);
+            this.ImportListButton.TabIndex = 55;
+            this.ImportListButton.Text = "Import list...";
+            this.ImportListButton.UseVisualStyleBackColor = true;
+            this.ImportListButton.Click += new System.EventHandler(this.ImportListButton_Click);
+            // 
             // ThreadLabel
             // 
             this.ThreadLabel.AutoSize = true;
@@ -667,7 +679,12 @@
             this.IntervalNum.Name = "IntervalNum";
             this.IntervalNum.Size = new System.Drawing.Size(70, 31);
             this.IntervalNum.TabIndex = 15;
-            // 
+            this.IntervalNum.Value = new decimal(new int[] {
+            4,
+            0,
+            0,
+            0});
+            //
             // FontLabel
             // 
             this.FontLabel.AutoSize = true;
@@ -778,6 +795,7 @@
         internal System.Windows.Forms.Label NovelNoLable;
         internal System.Windows.Forms.Button DownloadButton;
         internal System.Windows.Forms.Button AddToListButton;
+        internal System.Windows.Forms.Button ImportListButton;
         internal System.Windows.Forms.ListBox DownloadList;
         internal System.Windows.Forms.Button QueueDownloadButton;
         internal System.Windows.Forms.Button QueueDeleteAllButton;

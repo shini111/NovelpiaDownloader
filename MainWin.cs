@@ -26,7 +26,7 @@ namespace NovelpiaDownloader
             BonusNeverCheck.CheckedChanged += (s, e) => { if (BonusNeverCheck.Checked && BonusAlwaysCheck.Checked) BonusAlwaysCheck.Checked = false; };
             BonusAlwaysCheck.CheckedChanged += (s, e) => { if (BonusAlwaysCheck.Checked && BonusNeverCheck.Checked) BonusNeverCheck.Checked = false; };
 
-            string lang = Lang.Ko;
+            string lang = Lang.En;
             if (File.Exists("config.json"))
             {
                 var config_dict = new JavaScriptSerializer().Deserialize<Dictionary<string, dynamic>>(File.ReadAllText("config.json"));
@@ -86,8 +86,13 @@ namespace NovelpiaDownloader
         void ApplyLanguage(string lang)
         {
             int idx = System.Array.IndexOf(Lang.Codes, lang);
-            LanguageBox.SelectedIndex = idx >= 0 ? idx : 0;
-            Lang.Apply(this, idx >= 0 ? lang : Lang.Ko);
+            if (idx < 0)
+            {
+                lang = Lang.En;
+                idx = System.Array.IndexOf(Lang.Codes, lang);
+            }
+            LanguageBox.SelectedIndex = idx;
+            Lang.Apply(this, lang);
         }
 
         private void LanguageBox_SelectedIndexChanged(object sender, EventArgs e)
@@ -141,13 +146,18 @@ namespace NovelpiaDownloader
             StartSingleJob(job, onAllDone: null);
         }
 
-        private DownloadJob BuildJobFromUI()
+        private DownloadJob BuildJobFromUI(string overrideNovelNo = null)
         {
-            var noMatch = Regex.Match(NovelNoText.Text ?? "", @"\d+");
-            if (!noMatch.Success) return null;
+            string novelNo = overrideNovelNo;
+            if (novelNo == null)
+            {
+                var noMatch = Regex.Match(NovelNoText.Text ?? "", @"\d+");
+                if (!noMatch.Success) return null;
+                novelNo = noMatch.Value;
+            }
             var job = new DownloadJob
             {
-                novelNo = noMatch.Value,
+                novelNo = novelNo,
                 saveAsEpub = EpubButton.Checked,
                 includeNotice = NoticeCheck.Checked,
                 removeBlank = RemoveBlankCheck.Checked,
@@ -173,31 +183,36 @@ namespace NovelpiaDownloader
             return job;
         }
 
+        // Queue / batch (askIfMissing false): saved in the Save to folder, named after the novel ID.
+        // Single download (askIfMissing true): always asks, so you pick the name yourself.
         private bool ResolveTargetPath(DownloadJob job, bool askIfMissing)
         {
             string ext = job.saveAsEpub ? ".epub" : ".txt";
-            if (!string.IsNullOrEmpty(job.outputDir) && Directory.Exists(job.outputDir))
+            bool folderOk = !string.IsNullOrEmpty(job.outputDir) && Directory.Exists(job.outputDir);
+            if (!askIfMissing)
             {
-                string title = FetchNovelTitle(job.novelNo);
-                if (string.IsNullOrEmpty(title)) title = job.novelNo;
-                foreach (char c in Path.GetInvalidFileNameChars())
-                    title = title.Replace(c, '_');
-                job.title = title;
-                if (job.includeNovelNoInName)
-                    title = $"{job.novelNo}_{title}";
+                if (!folderOk) return false;
+                string name = job.novelNo;
                 if (job.includeChapterRangeInName && (job.fromChecked || job.toChecked))
                 {
-                    int fromN = job.fromChecked ? job.fromN : 0;
+                    int fromN = job.fromChecked ? job.fromN : 1;
                     string toN = job.toChecked ? job.toN.ToString() : "end";
-                    title = $"{title}_{fromN}-{toN}";
+                    name = $"{name}_{fromN}-{toN}";
                 }
-                job.targetPath = Path.Combine(job.outputDir, title + ext);
+                if (string.IsNullOrEmpty(job.title)) job.title = job.novelNo;
+                job.targetPath = Path.Combine(job.outputDir, name + ext);
                 return true;
             }
-            if (!askIfMissing) return false;
             string targetPath = null;
-            using (var sfd = new SaveFileDialog { Filter = job.saveAsEpub ? "|*.epub" : "|*.txt" })
+            using (var sfd = new SaveFileDialog
             {
+                Filter = job.saveAsEpub ? "|*.epub" : "|*.txt",
+                DefaultExt = ext.TrimStart('.'),
+                AddExtension = true,
+                FileName = job.novelNo
+            })
+            {
+                if (folderOk) sfd.InitialDirectory = job.outputDir;
                 if (sfd.ShowDialog() == DialogResult.OK)
                     targetPath = sfd.FileName;
             }
@@ -228,11 +243,119 @@ namespace NovelpiaDownloader
             fbd.Dispose();
         }
 
+        // Adds the novel in the Novel ID box to the queue. If that box holds the path of a
+        // list file instead, the whole file is imported (same as the Import list button).
         private void AddToListButton_Click(object sender, EventArgs e)
         {
+            string raw = (NovelNoText.Text ?? "").Trim().Trim('"');
+            if (raw.Length > 0 && File.Exists(raw))
+            {
+                ImportListFile(raw);
+                return;
+            }
             var job = BuildJobFromUI();
             if (job == null) return;
-            foreach (var existing in _queue)
+            AddJobToQueue(job);
+        }
+
+        private void ImportListButton_Click(object sender, EventArgs e)
+        {
+            using (var ofd = new OpenFileDialog { Filter = "Text files (*.txt;*.csv)|*.txt;*.csv|All files (*.*)|*.*" })
+            {
+                if (ofd.ShowDialog() == DialogResult.OK)
+                    ImportListFile(ofd.FileName);
+            }
+        }
+
+        // One novel per line. Accepted: "434563", a novelpia URL, or "name,434563".
+        // Blank lines and lines starting with # are ignored.
+        private static string ParseListLine(string line)
+        {
+            if (line == null) return null;
+            line = line.Trim();
+            if (line.Length == 0 || line.StartsWith("#")) return null;
+            int sep = line.LastIndexOfAny(new[] { ',', '\t' });
+            string part = sep >= 0 ? line.Substring(sep + 1) : line;
+            var m = Regex.Match(part, @"\d+");
+            return m.Success ? m.Value : null;
+        }
+
+        private void SetImportBusy(bool busy)
+        {
+            ImportListButton.Enabled = !busy;
+            AddToListButton.Enabled = !busy;
+            QueueDownloadButton.Enabled = !busy;
+            QueueDeleteAllButton.Enabled = !busy;
+            QueueDeleteSelectedButton.Enabled = !busy;
+        }
+
+        // Queues every novel in the file with the settings currently shown in the window.
+        // Titles are fetched in the background, a second or so apart, so the window stays usable.
+        private void ImportListFile(string path)
+        {
+            if (_running || _queueRunning)
+            {
+                Log("Wait for the current download to finish before importing a list.\r\n");
+                return;
+            }
+            string[] lines;
+            try { lines = File.ReadAllLines(path); }
+            catch (Exception ex)
+            {
+                Log("Could not read the list: " + ex.Message + "\r\n");
+                return;
+            }
+            var jobs = new List<DownloadJob>();
+            int dups = 0;
+            foreach (string line in lines)
+            {
+                string id = ParseListLine(line);
+                if (id == null) continue;
+                var job = BuildJobFromUI(id);
+                if (job == null) continue;
+                if (IsDuplicateJob(job) || IsDuplicateJob(job, jobs)) { dups++; continue; }
+                jobs.Add(job);
+            }
+            string fileName = Path.GetFileName(path);
+            if (jobs.Count == 0)
+            {
+                Log("No new novel numbers found in " + fileName + (dups > 0 ? " (" + dups + " already queued)" : "") + ".\r\n");
+                return;
+            }
+            SetImportBusy(true);
+            Log("Importing " + jobs.Count + " novel(s) from " + fileName + "...\r\n");
+            Task.Run(() =>
+            {
+                int added = 0;
+                try
+                {
+                    foreach (var job in jobs)
+                    {
+                        string fetched = FetchNovelTitle(job.novelNo);
+                        job.title = string.IsNullOrEmpty(fetched) ? job.novelNo : fetched;
+                        Invoke(new Action(() =>
+                        {
+                            _queue.Add(job);
+                            DownloadList.Items.Add(FormatJobLabel(job));
+                        }));
+                        added++;
+                        Thread.Sleep((int)RandRange(800, 1800));
+                    }
+                }
+                finally
+                {
+                    Invoke(new Action(() =>
+                    {
+                        Log("Imported " + added + " novel(s)" + (dups > 0 ? ", skipped " + dups + " duplicate(s)" : "") + ".\r\n");
+                        SetImportBusy(false);
+                    }));
+                }
+            });
+        }
+
+        private bool IsDuplicateJob(DownloadJob job, List<DownloadJob> list = null)
+        {
+            foreach (var existing in list ?? _queue)
             {
                 if (existing.novelNo == job.novelNo &&
                     existing.fromChecked == job.fromChecked && existing.toChecked == job.toChecked &&
@@ -240,10 +363,17 @@ namespace NovelpiaDownloader
                     existing.saveAsEpub == job.saveAsEpub &&
                     existing.vertical == job.vertical && existing.gothic == job.gothic &&
                     existing.bonusNever == job.bonusNever && existing.bonusAlways == job.bonusAlways)
-                {
-                    Log(Lang.T("queue_dup", FormatJobLabel(job)));
-                    return;
-                }
+                    return true;
+            }
+            return false;
+        }
+
+        private bool AddJobToQueue(DownloadJob job)
+        {
+            if (IsDuplicateJob(job))
+            {
+                Log(Lang.T("queue_dup", FormatJobLabel(job)));
+                return false;
             }
             if (string.IsNullOrEmpty(job.title))
             {
@@ -253,6 +383,7 @@ namespace NovelpiaDownloader
             _queue.Add(job);
             DownloadList.Items.Add(FormatJobLabel(job));
             Log(Lang.T("queue_added", FormatJobLabel(job)));
+            return true;
         }
 
         private static string FormatJobLabel(DownloadJob job)
@@ -260,7 +391,7 @@ namespace NovelpiaDownloader
             string range;
             if (job.fromChecked || job.toChecked)
             {
-                string a = job.fromChecked ? job.fromN.ToString() : "0";
+                string a = job.fromChecked ? job.fromN.ToString() : "1";
                 string b = job.toChecked ? job.toN.ToString() : "end";
                 range = $"  ({a}-{b})";
             }
@@ -321,7 +452,28 @@ namespace NovelpiaDownloader
                 return;
             }
             Log(Lang.T("queue_book_header", index + 1, jobs.Count, FormatJobLabel(job)) + "\r\n");
-            StartSingleJob(job, onAllDone: () => RunQueueChain(jobs, index + 1));
+            StartSingleJob(job, onAllDone: () => RunQueueChainAfterPause(jobs, index + 1));
+        }
+
+        // Random pause between novels. A WinForms timer is used because onAllDone runs on
+        // the UI thread, so sleeping here would freeze the window.
+        private void RunQueueChainAfterPause(List<DownloadJob> jobs, int index)
+        {
+            if (index >= jobs.Count || _cancelRequested)
+            {
+                RunQueueChain(jobs, index);
+                return;
+            }
+            int secs = (int)RandRange(QueuePauseMinSec, QueuePauseMaxSec + 1);
+            Log("Waiting " + secs + "s before the next novel...\r\n");
+            var timer = new System.Windows.Forms.Timer { Interval = secs * 1000 };
+            timer.Tick += (s, e) =>
+            {
+                timer.Stop();
+                timer.Dispose();
+                RunQueueChain(jobs, index);
+            };
+            timer.Start();
         }
 
         private void FinishQueue()
@@ -368,7 +520,9 @@ namespace NovelpiaDownloader
             Directory.CreateDirectory(directory);
             int thread_num = job.threadNum;
             float interval = job.interval;
-            int from = job.fromChecked ? job.fromN : 0;
+            // Ranges work like the old downloader: From/To are positions in the novel's chapter
+            // list, counted from 1 and inclusive (From 25 To 30 = the 25th to the 30th chapter).
+            int from = job.fromChecked ? Math.Max(job.fromN - 1, 0) : 0;
             int to = job.toChecked ? job.toN : int.MaxValue;
             _stopOnError = job.stopOnError;
             _retryCount = retry;
@@ -452,7 +606,7 @@ namespace NovelpiaDownloader
                             allChapters.Add((kind, chapterId, chapter.Groups[2].Value, epNo));
                             // Stop paginating once we pass the EP cap, unless "always
                             // include BONUS" still needs to sweep the trailing BONUS.
-                            if (!isBonus && epNo > to && !bonusAlways)
+                            if (allChapters.Count >= to && !bonusAlways)
                             {
                                 get_content = false;
                                 break;
@@ -483,57 +637,27 @@ namespace NovelpiaDownloader
                         { int len = ConsoleBox.TextLength - capturedStart; ConsoleBox.Select(capturedStart, len); ConsoleBox.SelectedText = Lang.T("chapter_list_done", foundCnt) + "\r\n"; ConsoleBox.SelectionStart = ConsoleBox.TextLength; ConsoleBox.ScrollToCaret(); }
                     }
                     // Second pass: apply from/to filtering and queue download threads.
-                    int bonusIdx = 0;
-                    int bonusTailIdx = 0;
-                    int runningMaxEp = 0;
-                    int lastEpNo = 0;
+                    // File numbers follow the old downloader: the 0-based position of the chapter in
+                    // the novel's full list (BONUS included), so the first chapter is chapter0000
+                    // and a range never renumbers anything (starting at the 25th chapter gives
+                    // chapter0024 onwards).
+                    int listPos = -1;
                     foreach (var ch in allChapters)
                     {
+                        listPos++;
                         bool isBonus = ch.kind == "BONUS";
-                        string jsonPath;
-                        string label;
-                        if (isBonus)
+                        if (isBonus && bonusNever)
+                            continue;
+                        // "Always include BONUS" ignores the range for BONUS chapters only.
+                        if (!(isBonus && bonusAlways))
                         {
-                            bonusIdx++;
-                            if (bonusNever)
+                            if (listPos < from)
                                 continue;
-                            if (!bonusAlways)
-                            {
-                                bool isTail = maxEpFinal > 0 && runningMaxEp >= maxEpFinal;
-                                if (isTail)
-                                {
-                                    // Trailing BONUS: number past the final EP so a bounded
-                                    // "to EP" can reach it.
-                                    int virtualNo = maxEpFinal + (++bonusTailIdx);
-                                    if (virtualNo < from)
-                                        continue;
-                                    if (virtualNo > to)
-                                        break;
-                                }
-                                else
-                                {
-                                    // Mid-story BONUS: rides on the preceding EP's range
-                                    // membership; does not consume an EP number.
-                                    if (lastEpNo < from || lastEpNo > to)
-                                        continue;
-                                }
-                            }
-                            jsonPath = Path.Combine(directory, $"bonus_{bonusIdx.ToString().PadLeft(4, '0')}.json");
-                            label = "BONUS";
+                            if (listPos >= to)
+                                continue;
                         }
-                        else
-                        {
-                            int chapterNo = ch.epNo;
-                            if (chapterNo > runningMaxEp)
-                                runningMaxEp = chapterNo;
-                            lastEpNo = chapterNo;
-                            if (chapterNo < from)
-                                continue;
-                            if (chapterNo > to)
-                                continue;
-                            jsonPath = Path.Combine(directory, $"{chapterNo.ToString().PadLeft(4, '0')}.json");
-                            label = $"EP.{chapterNo:D4}";
-                        }
+                        string jsonPath = Path.Combine(directory, $"{listPos.ToString().PadLeft(4, '0')}.json");
+                        string label = isBonus ? "BONUS" : $"EP.{ch.epNo:D4}";
                         string encodedName = HttpUtility.HtmlEncode(ch.chapterName);
                         threads.Add(new Thread(() =>
                         {
@@ -773,18 +897,23 @@ namespace NovelpiaDownloader
             public IEnumerable<int> Keys => _paths.Keys;
         }
 
+        // A failed chapter is never given up on: wait RetryWaitSeconds, then try again, until it
+        // works or Stop is pressed. (The Retry box now only applies to image downloads.)
+        private const int RetryWaitSeconds = 30;
+
         private void DownloadChapter(string chapterId, string chapterName, string jsonPath, string label)
         {
-            if (_cancelRequested || _hadFatalError) { Interlocked.Increment(ref _progress_skip); return; }
             string prefix = string.IsNullOrEmpty(label) ? "" : label + " ";
-            int retry = _retryCount;
-            for (int attempt = 0; attempt <= retry; attempt++)
+            for (int attempt = 1; ; attempt++)
             {
+                if (_cancelRequested || _hadFatalError) { Interlocked.Increment(ref _progress_skip); return; }
                 try
                 {
                     string resp = PostRequest($"https://novelpia.com/proc/viewer_data/{chapterId}", novelpia.loginkey, null, "https://novelpia.com/");
-                    if (string.IsNullOrEmpty(resp) || resp.Contains("본인인증"))
-                        throw new Exception();
+                    if (string.IsNullOrEmpty(resp))
+                        throw new Exception("empty response");
+                    if (resp.Contains("본인인증"))
+                        throw new Exception("identity verification required (본인인증)");
                     using (var file = new StreamWriter(jsonPath, false))
                         file.Write(resp);
                     Interlocked.Increment(ref _progress_done);
@@ -792,23 +921,34 @@ namespace NovelpiaDownloader
                     UpdateProgressThrottled();
                     return;
                 }
-                catch
+                catch (Exception ex)
                 {
-                    if (attempt < retry)
-                        InsertLineAboveProgress(Lang.T("chapter_retry", attempt + 1, retry).TrimEnd('\r', '\n'));
-                    else
-                    {
-                        Interlocked.Increment(ref _progress_fail);
-                        InsertLineAboveProgress($"  ✗ {prefix}{chapterName}");
-                        UpdateProgressThrottled(force: true);
-                        if (_stopOnError) _hadFatalError = true;
-                    }
+                    InsertLineAboveProgress($"  ! {prefix}{chapterName}  attempt {attempt} failed [{DescribeError(ex)}], retrying in {RetryWaitSeconds}s");
+                    SleepInterruptible(RetryWaitSeconds * 1000);
                 }
             }
         }
 
+        // Short reason for a failed request, shown in the log (HTTP status plus the start of the reply).
+        private static string DescribeError(Exception ex)
+        {
+            var we = ex as WebException;
+            if (we != null && we.Response is HttpWebResponse hr)
+            {
+                string body = "";
+                try { using (var sr = new StreamReader(hr.GetResponseStream())) body = sr.ReadToEnd(); } catch { }
+                body = Regex.Replace(body ?? "", @"\s+", " ").Trim();
+                if (body.Length > 100) body = body.Substring(0, 100);
+                return "HTTP " + (int)hr.StatusCode + " " + hr.StatusCode + (body.Length > 0 ? ": " + body : "");
+            }
+            return string.IsNullOrEmpty(ex.Message) ? ex.GetType().Name : ex.Message;
+        }
+
         private string CleanText(string textStr, bool keepHtml, ref List<string> carry)
         {
+            // Some novels send every space as &nbsp; (or a raw U+00A0). Turn those into normal
+            // spaces so words wrap properly and the EPUB source stays readable.
+            textStr = textStr.Replace("&nbsp;", " ").Replace("\u00A0", " ");
             textStr = Regex.Replace(textStr, @"<p style='height: 0px; width: 0px;.+?>.*?</p>", "");
             if (!keepHtml)
             {
@@ -909,16 +1049,16 @@ namespace NovelpiaDownloader
                                 }
                                 else if (!removeBlank)
                                 {
-                                    sb.Append("<p>&#160;</p>\n");
+                                    sb.Append("<p></p>\n");
                                 }
                             }
                             continue;
                         }
                         textStr = CleanText(textStr, keepHtml, ref carry);
-                        if (textStr == "")
+                        if (string.IsNullOrWhiteSpace(textStr))
                         {
                             if (!removeBlank)
-                                sb.Append("<p>&#160;</p>\n");
+                                sb.Append("<p></p>\n");
                             continue;
                         }
                         if (font_mapping != null)
@@ -1107,6 +1247,30 @@ namespace NovelpiaDownloader
             }
         }
 
+        // Pacing. The Interval box sets the minimum pause between chapter batches; a random
+        // extra of up to JitterSpreadSeconds is added each time (interval 4.0 gives 4.0-5.0 s).
+        // Threads inside a batch are started a little apart instead of all at once.
+        // An interval of 0 keeps the old behaviour (no pause, no stagger).
+        private const double JitterSpreadSeconds = 1.0;
+        private const int StaggerMinMs = 300, StaggerMaxMs = 900;
+        private const int QueuePauseMinSec = 10, QueuePauseMaxSec = 30;
+        private static readonly Random _rng = new Random();
+
+        private static double RandRange(double min, double max)
+        {
+            lock (_rng) return min + _rng.NextDouble() * (max - min);
+        }
+
+        private void SleepInterruptible(int ms)
+        {
+            while (ms > 0 && !_cancelRequested && !_hadFatalError)
+            {
+                int step = ms < 250 ? ms : 250;
+                Thread.Sleep(step);
+                ms -= step;
+            }
+        }
+
         private void ExecuteThreads(List<Thread> threads, int batch_size, float interval)
         {
             for (int i = 0; i < threads.Count; i += batch_size)
@@ -1115,11 +1279,16 @@ namespace NovelpiaDownloader
                 int remain = threads.Count - i;
                 int limit = batch_size < remain ? batch_size : remain;
                 for (int j = 0; j < limit; j++)
+                {
                     threads[i + j].Start();
+                    if (interval > 0 && j < limit - 1)
+                        SleepInterruptible((int)RandRange(StaggerMinMs, StaggerMaxMs));
+                }
                 for (int j = 0; j < limit; j++)
                     threads[i + j].Join();
                 if (_cancelRequested || _hadFatalError) break;
-                Thread.Sleep((int)(interval * 1000));
+                if (interval > 0)
+                    SleepInterruptible((int)((interval + RandRange(0, JitterSpreadSeconds)) * 1000));
             }
         }
 
